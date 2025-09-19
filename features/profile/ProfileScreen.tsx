@@ -195,7 +195,7 @@ const ProfileScreen: React.FC = () => {
           <div className="mt-6 pt-6 border-t border-white/20">
             <div className="flex justify-between items-center">
                 <p className="text-lg font-semibold text-primary dark:text-purple-300">{user.personalityType}</p>
-                 <Button onClick={() => navigate('/quiz')} variant="secondary" size="sm">Retake Quiz</Button>
+                 <Button onClick={() => navigate('/personality-quiz')} variant="secondary" size="sm">Retake Quiz</Button>
             </div>
              {isEditing ? (
                 <div>

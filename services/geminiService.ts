@@ -1,84 +1,94 @@
+// Fix: Implementing Gemini API services for avatar and icebreaker generation.
+import { GoogleGenAI, GenerateContentResponse, Type } from "@google/genai";
+import { User, Hobby } from '../types';
 
-import { GoogleGenAI, Type } from "@google/genai";
-import { Hobby, User, PersonalityType } from '../types';
+// The API key MUST be obtained exclusively from the environment variable `process.env.API_KEY`.
+// This variable is assumed to be pre-configured in the execution environment.
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
 
-const API_KEY = process.env.API_KEY;
-
-if (!API_KEY) {
-  console.warn("API_KEY environment variable not set. Gemini API calls will fail.");
-}
-
-const ai = new GoogleGenAI({ apiKey: API_KEY! });
-
+/**
+ * Generates an avatar image based on user hobbies.
+ * @param hobbies - An array of user hobbies.
+ * @returns A base64 encoded string of the generated image.
+ */
 export const generateAvatar = async (hobbies: Hobby[]): Promise<string> => {
-  if (!API_KEY) {
-    // Return a placeholder if API key is not available
-    return `https://picsum.photos/seed/${hobbies.map(h => h.name).join('')}/512`;
-  }
-  try {
-    const hobbyNames = hobbies.map(h => h.name).slice(0, 3).join(', ');
-    const prompt = `A vibrant, minimalist, abstract avatar representing ${hobbyNames}. Gen Z aesthetic, clean lines, glassmorphism style, with shiny blue and purple vibes. No text, no faces.`;
+    const hobbyNames = hobbies.map(h => h.name).join(', ');
+    const prompt = `minimalist, abstract, vibrant, vector art logo for a profile avatar. The design should subtly represent the themes of ${hobbyNames}. Clean background, modern, simple shapes, digital art.`;
 
-    const response = await ai.models.generateImages({
-        model: 'imagen-4.0-generate-001',
-        prompt: prompt,
-        config: {
-          numberOfImages: 1,
-          outputMimeType: 'image/jpeg',
-          aspectRatio: '1:1',
-        },
-    });
+    try {
+        const response = await ai.models.generateImages({
+            model: 'imagen-4.0-generate-001',
+            prompt: prompt,
+            config: {
+              numberOfImages: 1,
+              outputMimeType: 'image/png',
+              aspectRatio: '1:1',
+            },
+        });
 
-    const base64ImageBytes: string = response.generatedImages[0].image.imageBytes;
-    return `data:image/jpeg;base64,${base64ImageBytes}`;
-  } catch (error) {
-    console.error("Error generating avatar:", error);
-    // Fallback to a placeholder on error
-    return `https://picsum.photos/seed/${hobbies.map(h => h.name).join('')}/512`;
-  }
+        if (response.generatedImages && response.generatedImages.length > 0) {
+            const base64ImageBytes = response.generatedImages[0].image.imageBytes;
+            return `data:image/png;base64,${base64ImageBytes}`;
+        } else {
+            throw new Error("No image was generated.");
+        }
+    } catch (error) {
+        console.error("Error generating avatar with Gemini:", error);
+        // Fallback to a pravatar image on error
+        return `https://i.pravatar.cc/300?u=error_${Date.now()}`;
+    }
 };
 
+/**
+ * Generates icebreaker suggestions for a chat between two users.
+ * @param user1 - The first user.
+ * @param user2 - The second user.
+ * @returns An array of icebreaker strings.
+ */
 export const generateIcebreakers = async (user1: User, user2: User): Promise<string[]> => {
-  if (!API_KEY) {
-    return ["Hey! What's up?", "Cool hobbies! Which one is your favorite?", "Hi! Nice to meet you."];
-  }
-  try {
-    const sharedHobbies = user1.hobbies.filter(h1 => user2.hobbies.some(h2 => h2.id === h1.id));
-    const prompt = `Generate 3 fun, quirky, and short icebreaker messages for two new friends who just matched on a friendship app called Frinzy. Do not include greetings like "Hey" or "Hi".
-    
-    User 1: Personality is ${user1.personalityType}, likes ${user1.hobbies.map(h => h.name).join(', ')}.
-    User 2: Personality is ${user2.personalityType}, likes ${user2.hobbies.map(h => h.name).join(', ')}.
-    Shared Hobbies: ${sharedHobbies.length > 0 ? sharedHobbies.map(h => h.name).join(', ') : 'None'}.
-    
-    Keep the tone very casual, friendly, and Gen Z style. The suggestions should be ready to send.`;
+    const user1Hobbies = user1.hobbies.map(h => h.name).join(', ');
+    const user2Hobbies = user2.hobbies.map(h => h.name).join(', ');
 
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
-        config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                    icebreakers: {
-                        type: Type.ARRAY,
-                        items: {
-                            type: Type.STRING
-                        }
+    const prompt = `
+        Based on the profiles of two people, create three short, engaging icebreaker questions (less than 15 words each).
+        The goal is to find common ground or interesting differences. Do not use emojis.
+
+        Person 1 Hobbies: ${user1Hobbies}
+        Person 1 Bio: ${user1.bio}
+        Person 1 Personality: ${user1.personalityType}
+
+        Person 2 Hobbies: ${user2Hobbies}
+        Person 2 Bio: ${user2.bio}
+        Person 2 Personality: ${user2.personalityType}
+    `;
+
+    try {
+        const response: GenerateContentResponse = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.ARRAY,
+                    items: {
+                        type: Type.STRING,
+                        description: "A short, engaging icebreaker question."
                     }
                 }
-            }
+            },
+        });
+        
+        const jsonStr = response.text.trim();
+        const suggestions = JSON.parse(jsonStr);
+        
+        if (Array.isArray(suggestions) && suggestions.every(s => typeof s === 'string')) {
+            return suggestions.slice(0, 3);
+        } else {
+            throw new Error("Invalid format for icebreakers");
         }
-    });
-    
-    // FIX: Parse the JSON response from the model.
-    // The response is now guaranteed to be a JSON string due to responseSchema.
-    const jsonResponse = JSON.parse(response.text);
-    const icebreakers = jsonResponse.icebreakers;
-    
-    return Array.isArray(icebreakers) && icebreakers.every(item => typeof item === 'string') ? icebreakers : [];
-  } catch (error) {
-    console.error("Error generating icebreakers:", error);
-    return ["Hey! What's up?", "Love your vibe! What are you up to this weekend?", "We matched! What's your go-to comfort food?"];
-  }
+    } catch (error) {
+        console.error("Error generating icebreakers:", error);
+        // Fallback suggestions
+        return ["What's the most interesting thing you've done recently?", "If you could travel anywhere, where would you go?", "What's a hobby you've always wanted to try?"];
+    }
 };

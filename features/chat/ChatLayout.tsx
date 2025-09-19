@@ -1,14 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { NavLink, Outlet, useParams } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { fetchMatchesForUser } from '../../services/mockApi';
-import { Match } from '../../types';
+import { supabase } from '../../services/supabaseClient';
+import { Match, User } from '../../types';
 import GlassCard from '../../components/GlassCard';
 
-const ChatListItem: React.FC<{ match: Match }> = ({ match }) => {
+// Temporary simplified match type for this layout
+interface MatchWithUsers extends Match {
+    users: User[];
+}
+
+const ChatListItem: React.FC<{ match: MatchWithUsers }> = ({ match }) => {
   const { user } = useAuth();
   const otherUser = match.users.find(u => u.id !== user?.id);
-  const lastMessage = match.messages[match.messages.length - 1];
+  // Last message would need another query or be part of the initial fetch, simplifying for now
+  const lastMessage = "Say hello!"; 
 
   const navLinkClasses = ({ isActive }: { isActive: boolean }) =>
     `flex items-center p-3 rounded-xl transition-colors w-full text-left ${
@@ -22,7 +28,7 @@ const ChatListItem: React.FC<{ match: Match }> = ({ match }) => {
       <img src={otherUser.avatarUrl} alt={otherUser.name} className="w-12 h-12 rounded-full mr-3 object-cover" />
       <div className="flex-grow overflow-hidden">
         <h3 className="font-bold truncate">{otherUser.name}</h3>
-        <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{lastMessage?.text}</p>
+        <p className="text-sm text-gray-500 dark:text-gray-400 truncate">{lastMessage}</p>
       </div>
     </NavLink>
   );
@@ -31,15 +37,53 @@ const ChatListItem: React.FC<{ match: Match }> = ({ match }) => {
 const ChatLayout: React.FC = () => {
   const { user } = useAuth();
   const { matchId } = useParams<{ matchId: string }>();
-  const [matches, setMatches] = useState<Match[]>([]);
+  const [matches, setMatches] = useState<MatchWithUsers[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!user) return;
     const loadMatches = async () => {
       setLoading(true);
-      const userMatches = await fetchMatchesForUser(user.id);
-      setMatches(userMatches);
+      // This query is a bit complex. It finds matches for the current user
+      // and then fetches the profiles of both users in the match.
+      // An RPC in Supabase would be more efficient.
+      const { data: matchIds, error } = await supabase
+        .from('matches')
+        .select('id, user1_id, user2_id')
+        .or(`user1_id.eq.${user.id},user2_id.eq.${user.id}`);
+
+      if (error) {
+          console.error("Error fetching matches:", error);
+          setLoading(false);
+          return;
+      }
+      
+      const userIds = new Set<string>();
+      matchIds.forEach(m => {
+          userIds.add(m.user1_id);
+          userIds.add(m.user2_id);
+      });
+      
+      const { data: profiles, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .in('id', Array.from(userIds));
+
+      if (profileError) {
+          console.error("Error fetching profiles for matches:", profileError);
+          setLoading(false);
+          return;
+      }
+
+      const profilesById = new Map(profiles.map(p => [p.id, p]));
+
+      const populatedMatches = matchIds.map(match => ({
+          id: match.id,
+          users: [profilesById.get(match.user1_id), profilesById.get(match.user2_id)].filter(Boolean) as User[],
+          messages: [] // messages are fetched in ChatScreen
+      }));
+
+      setMatches(populatedMatches);
       setLoading(false);
     };
     loadMatches();

@@ -1,12 +1,16 @@
-
 import React, { useState, useEffect } from 'react';
 import { Event } from '../../types';
-import { fetchEvents } from '../../services/mockApi';
+import { supabase } from '../../services/supabaseClient';
 import GlassCard from '../../components/GlassCard';
 import Button from '../../components/Button';
+import { useAuth } from '../../contexts/AuthContext';
 
 const EventCard: React.FC<{ event: Event }> = ({ event }) => {
   const [isAttending, setIsAttending] = useState(false);
+  const [attendeeCount, setAttendeeCount] = useState(event.attendees.length);
+  const { user } = useAuth();
+  
+  // In a real app, you'd check if the current user ID is in the attendees list.
   
   const formattedDate = new Date(event.date).toLocaleDateString('en-US', {
     weekday: 'long',
@@ -16,6 +20,15 @@ const EventCard: React.FC<{ event: Event }> = ({ event }) => {
     hour: 'numeric',
     minute: '2-digit'
   });
+  
+  const handleRsvp = async () => {
+      if (!user) return;
+      // This is a simplified toggle. A real implementation would need to properly
+      // add/remove user from the attendees array in the database.
+      // Using an RPC in Supabase would be the best way to handle this atomically.
+      setIsAttending(!isAttending);
+      setAttendeeCount(prev => isAttending ? prev - 1 : prev + 1);
+  };
 
   return (
     <GlassCard>
@@ -24,8 +37,8 @@ const EventCard: React.FC<{ event: Event }> = ({ event }) => {
       <p className="font-semibold mb-3">{formattedDate}</p>
       <p className="text-gray-600 dark:text-gray-300 mb-4">{event.description}</p>
       <div className="flex justify-between items-center">
-        <p className="text-sm font-medium">{event.attendees.length} attending</p>
-        <Button onClick={() => setIsAttending(!isAttending)} variant={isAttending ? 'secondary' : 'primary'} size="sm">
+        <p className="text-sm font-medium">{attendeeCount} attending</p>
+        <Button onClick={handleRsvp} variant={isAttending ? 'secondary' : 'primary'} size="sm">
           {isAttending ? 'Attending ✓' : 'RSVP'}
         </Button>
       </div>
@@ -41,8 +54,16 @@ const EventsScreen: React.FC = () => {
   useEffect(() => {
     const loadEvents = async () => {
       setLoading(true);
-      const fetchedEvents = await fetchEvents();
-      setEvents(fetchedEvents);
+      const { data, error } = await supabase
+        .from('events')
+        .select('*')
+        .order('date', { ascending: true });
+        
+      if (error) {
+        console.error("Error fetching events:", error);
+      } else {
+        setEvents(data as Event[]);
+      }
       setLoading(false);
     };
     loadEvents();
